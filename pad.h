@@ -5,6 +5,10 @@
  *			pad.h: PadRead() accsess macro
  */
 
+ #ifndef _PAD_H_
+ #define _PAD_H_
+ #include <libps.h>
+
 #define PADLup     (1<<12)
 #define PADLdown   (1<<14)
 #define PADLleft   (1<<15)
@@ -27,3 +31,8 @@
 #define PADR2      PADm
 #define PADstart   PADh
 #define PADselect  PADk
+
+u_long PadRead(void);
+void PadInit(void);
+
+#endif

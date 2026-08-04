@@ -28,10 +28,23 @@ LIBS = -lps
 
 PROG = main.elf
 
-OBJS = main.o
+BUILD_DIR = build
+
+SRCS = \
+    main.c \
+    ny_light.c \
+    pad.c
+
+OBJS = $(SRCS:%.c=$(BUILD_DIR)/%.o)
 
 $(PROG): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 clean:
-	rm -f $(PROG) $(OBJS)
+	rm -rf $(BUILD_DIR) $(PROG)
