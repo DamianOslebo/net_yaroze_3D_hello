@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <libps.h>
 #include <string.h>
-#include <pad.h>
+#include "pad.h"
+#include "ny_light.h"
 
 /* Globals */
 #define SCREEN_W   320
@@ -15,54 +16,54 @@
 
 GsOT            Wot[2];
 GsOT_TAG        zSortTable[2][1<<OT_LENGTH];
-
 PACKET          gpuPacketArea[2][PACKETMAX];
 
-volatile u_char *bb0;
-volatile u_char *bb1;
-
-u_long          PadData;
-
-GsF_LIGHT      flLights[2];
 GsRVIEW2       view;
 
 typedef struct {
+    SVECTOR rotation;
     GsDOBJ2 gsObjectHandler;
     GsCOORDINATE2 gsObjectCoord;
 } PlayerStructType0;
 
 PlayerStructType0 playerStruct0;
+u_long PadData;
+u_char PLAYING = 1;
+u_long vsyncInterval = 0;
+
+extern GsF_LIGHT      flLights[2];
 
 /* Functions */
 void InitGraphics(void);
-void InitLight(GsF_LIGHT *light, int nLight, int nX, int nY, int nZ, int nRed, int nGreen, int nBlue);
-void InitAllLights();
-void InitializeView(GsRVIEW2 *view, int nProjDist, int nRZ, int nVPx, int nVPy, int nVPz, int nVRX, int nVRY, int nVRZ);
+void InitializeStaticView(GsRVIEW2 *view, int nProjDist, int nRZ, int nVPx, int nVPy, int nVPz, int nVRX, int nVRY, int nVRZ);
+void InitializeTrackerView(GsRVIEW2 *view, int nProjDist, int nRZ, int nVPx, int nVPy, int nVPz, int nVRX, int nVRY, int nVRZ);
+void InitializePlayer(PlayerStructType0 *player, int nX, int nY, int nZ, unsigned long *modelAddress);
 void AddModelToPlayer(PlayerStructType0 *player, int nX, int nY, int nZ, unsigned long *modelAddress);
 void DrawPlayer(PlayerStructType0 *player, GsOT *ot);
-static u_long PadRead(void);
 void RenderFrame(void);
+void ResetMatrix(short m[3][3]);
+void RotateModel(GsCOORDINATE2 *gsObjectCoord, SVECTOR *rotationVector, int nX, int nY, int nZ);
+void MoveModel(GsCOORDINATE2 *gsObjectCoord, int nX, int nY, int nZ);
+void ProcessUserInput(void);
+void AdvanceModel(GsCOORDINATE2 *gsObjectCoord, SVECTOR *rotationVector, int nD);
 
 /* main() */
-
 int main(void)
 {
     FntLoad(960, 256);
-    FntOpen(16, 16, 256, 200, 0, 512);
-    GetPadBuf(&bb0, &bb1);
+    FntOpen(-96, -96, 256, 200, 0, 512);
+    PadInit();
     InitGraphics();
     InitAllLights();
-    InitializeView(&view, 250, 0, 3000, -500, 0, 0, 0, 0);
-    AddModelToPlayer(&playerStruct0, 0, -200, 0, (unsigned long *)MODEL_MEM_ADDRESS);
+    InitializeStaticView(&view, 250, 0, 2000, -500, 0, 0, 0, 0);
+    InitializePlayer(&playerStruct0, 0, -200, 0, (unsigned long *)MODEL_MEM_ADDRESS);
 
-    while(1)
+    while(PLAYING)
     {
-        PadData = PadRead();
-        if (PadData & PADselect)
-            break;
-        RenderFrame();
+        ProcessUserInput();
+        RenderFrame();        
     }
-    ResetGraph(3);
+    ResetGraph(0);
     return 0;
 }
 
@@ -101,23 +102,23 @@ void RenderFrame(void)
     GsSetWorkBase((PACKET*)gpuPacketArea[currentBuffer]);
     GsClearOt(0, 0, &Wot[currentBuffer]);
     DrawPlayer(&playerStruct0, &Wot[currentBuffer]);
-    FntPrint("Hello World!\n");
+
+    DrawSync(0);
+    vsyncInterval = VSync(0);
+    FntPrint("VSync Interval: %d\n", vsyncInterval);
     FntFlush(-1);
-    VSync(0);
     GsSwapDispBuff();
+
     GsSortClear(0, 0, 0, &Wot[currentBuffer]);
     GsDrawOt(&Wot[currentBuffer]);
 }
 
-static u_long PadRead()
+void InitializePlayer(PlayerStructType0 *player, int nX, int nY, int nZ, unsigned long *modelAddress)
 {
-    return ~(
-        (*(bb0 + 3)) |
-        (*(bb0 + 2) << 8) |
-        (*(bb1 + 3) << 16) |
-        (*(bb1 + 2) << 24)
-    );
-    
+    player->rotation.vx = 0;
+    player->rotation.vy = 0;
+    player->rotation.vz = 0;
+    AddModelToPlayer(player, nX, nY, nZ, modelAddress);
 }
 
 void AddModelToPlayer(PlayerStructType0 *player, int nX, int nY, int nZ, unsigned long *modelAddress)
@@ -150,27 +151,7 @@ void DrawPlayer(PlayerStructType0 *player, GsOT *ot)
     GsSortObject4(&player->gsObjectHandler, ot, 4, (u_long *)getScratchAddr(0));
 }
 
-void InitAllLights()
-{
-    InitLight(&flLights[0], 0, -1, -1, -1, 255, 255, 255); // White light 1 
-    InitLight(&flLights[1], 1,  1,  1,  1, 255, 255, 255);     // White light 2
-    GsSetAmbient(0, 0, 0); // Set ambient light to black
-    GsSetLightMode(0); // Enable lighting
-}
-
-void InitLight(GsF_LIGHT *light, int nLight, int nX, int nY, int nZ, int nRed, int nGreen, int nBlue)
-{
-    light->vx = nX;
-    light->vy = nY;
-    light->vz = nZ;
-    light->r = nRed;
-    light->g = nGreen;
-    light->b = nBlue;
-
-    GsSetFlatLight(nLight, light);
-}   
-
-void InitializeView(GsRVIEW2 *view, int nProjDist, int nRZ, int nVPx, int nVPy, int nVPz, int nVRX, int nVRY, int nVRZ)
+void InitializeStaticView(GsRVIEW2 *view, int nProjDist, int nRZ, int nVPx, int nVPy, int nVPz, int nVRX, int nVRY, int nVRZ)
 {
     GsSetProjection(nProjDist);
     view->rz = -nRZ;
@@ -182,7 +163,125 @@ void InitializeView(GsRVIEW2 *view, int nProjDist, int nRZ, int nVPx, int nVPy, 
     view->vrz = nVRZ;
 
     view->super = WORLD; // Set the super coordinate to WORLD
-    // view->super = &playerStruct0.gsObjectCoord; // Set the super coordinate to the player's coordinate
-
     GsSetRefView2(view);
+}
+
+void InitializeTrackerView(GsRVIEW2 *view, int nProjDist, int nRZ, int nVPx, int nVPy, int nVPz, int nVRX, int nVRY, int nVRZ)
+{
+    GsSetProjection(nProjDist);
+    view->rz = -nRZ;
+    view->vpx = nVPx;
+    view->vpy = nVPy;
+    view->vpz = nVPz;
+    view->vrx = nVRX;
+    view->vry = nVRY;
+    view->vrz = nVRZ;
+
+    view->super = &playerStruct0.gsObjectCoord; // Set the super coordinate to the player's coordinate
+    GsSetRefView2(view);
+}
+
+void MoveModel(GsCOORDINATE2 *gsObjectCoord, int nX, int nY, int nZ)
+{
+    gsObjectCoord->coord.t[0] += nX; // Move the model in the X direction
+    gsObjectCoord->coord.t[1] += nY; // Move the model in the Y direction
+    gsObjectCoord->coord.t[2] += nZ; // Move the model in the Z direction
+    gsObjectCoord->flg = 0; // Set the flag to indicate that the model has been moved
+}
+
+void ResetMatrix(short m[3][3])
+{
+    m[0][0] = ONE; m[0][1] = 0;   m[0][2] = 0;
+    m[1][0] = 0;   m[1][1] = ONE; m[1][2] = 0;
+    m[2][0] = 0;   m[2][1] = 0;   m[2][2] = ONE;
+}
+
+void RotateModel(GsCOORDINATE2 *gsObjectCoord, SVECTOR *rotationVector, int nX, int nY, int nZ)
+{
+    MATRIX rotationMatrix;
+    ResetMatrix(gsObjectCoord->coord.m); // Reset the rotation matrix to identity
+    rotationVector->vx = (rotationVector->vx + nX) % ONE; // Update the rotation vector's X component
+    rotationVector->vy = (rotationVector->vy + nY) % ONE; // Update the rotation vector's Y component
+    rotationVector->vz = (rotationVector->vz + nZ) % ONE; // Update the rotation vector's Z component
+    RotMatrix(rotationVector, &rotationMatrix);
+    // Apply the rotation matrix to the object's coordinate system
+    MulMatrix0(&gsObjectCoord->coord, &rotationMatrix, &gsObjectCoord->coord);
+    gsObjectCoord->flg = 0; // Set the flag to indicate that the model has been rotated
+}
+
+void AdvanceModel(GsCOORDINATE2 *gsObjectCoord, SVECTOR *rotationVector, int nD)
+{
+    if (nD ==0) return; // No movement if nD is zero
+    MATRIX maxTmp;
+    SVECTOR startVector;
+    SVECTOR currentDirection;
+
+    startVector.vx = 0; // Start vector in the X direction
+    startVector.vy = 0; // Start vector in the Y direction
+    startVector.vz = ONE; // Start vector in the Z direction (forward/back
+    RotMatrix(rotationVector, &maxTmp); // Create a rotation matrix based on the current rotation vector
+    ApplyMatrixSV(&maxTmp, &startVector, &currentDirection); // Apply the rotation matrix to the start vector to get the current direction
+    gsObjectCoord->coord.t[0] += (currentDirection.vx * nD)/ ONE; // Move the model in the X direction based on the current direction and distance
+    gsObjectCoord->coord.t[1] += (currentDirection.vy * nD)/ ONE; // Move the model in the Y direction based on the current direction and distance
+    gsObjectCoord->coord.t[2] += (currentDirection.vz * nD)/ ONE; // Move the model in the Z direction based on the current direction and distance
+
+    gsObjectCoord->flg = 0; // Set the flag to indicate that the model has been moved
+}
+
+void ProcessUserInput(void)
+{
+    PadData = PadRead();
+    if (PadData & PADselect)
+        PLAYING = 0; // Exit the game loop if the select button is pressed
+    
+    if (PadData & PADLleft)
+    {
+        FntPrint("Left Arrow: Rotating Left\n");
+        RotateModel(&playerStruct0.gsObjectCoord, &playerStruct0.rotation, 0, -64, 0); // Rotate left
+    }
+    if (PadData & PADLright)
+    {
+        FntPrint("Right Arrow: Rotating Right Lateral\n");
+        RotateModel(&playerStruct0.gsObjectCoord, &playerStruct0.rotation, 0, 64, 0); // Rotate right
+    }
+    if (PadData & PADLup)
+    {
+        FntPrint("Up Arrow: Moving Forward Lateral\n");
+        MoveModel(&playerStruct0.gsObjectCoord, 0, 0, 10); // Move up
+    }
+    if (PadData & PADLdown)
+    {
+        FntPrint("Down Arrow: Moving Backward\n");
+        MoveModel(&playerStruct0.gsObjectCoord, 0, 0, -10); // Move down
+    }
+    if (PadData & PADRup)
+    {
+        FntPrint("Up Arrow: Moving Forward\n");
+        AdvanceModel(&playerStruct0.gsObjectCoord, &playerStruct0.rotation, 16); // Move up
+    }
+    if (PadData & PADRdown)
+    {
+        FntPrint("Down Arrow: Moving Backward\n");
+        AdvanceModel(&playerStruct0.gsObjectCoord, &playerStruct0.rotation, -16); // Move down
+    }
+    if (PadData & PADstart)
+    {
+        FntPrint("Start Button: Resetting Position\n");
+        playerStruct0.gsObjectCoord.coord= GsIDMATRIX; // Reset the player's coordinate system to identity
+        // Reset the player's rotation
+        playerStruct0.rotation.vx = 0;
+        playerStruct0.rotation.vy = 0; 
+        playerStruct0.rotation.vz = 0;
+        playerStruct0.gsObjectCoord.flg = 0;
+    }
+    if (PadData & PADL1)
+    {
+        FntPrint("Pad L1: Static View\n");
+        InitializeStaticView(&view, 250, 0, -500, -1000, 0, 0, 0, 0);
+    }
+    if (PadData & PADR1)
+    {
+        FntPrint("Pad R1: Tracker View\n");
+        InitializeTrackerView(&view, 250, 0, 0, -1000, -1000, 0, 0, 0);
+    }
 }
